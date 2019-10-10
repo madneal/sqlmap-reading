@@ -1,5 +1,7 @@
 import re
 import typing
+import binascii
+import base64
 
 # Splitter used between requests in WebScarab log files
 WEBSCARAB_SPLITTER = "### Conversation"
@@ -15,9 +17,23 @@ SAFE_HEX_MARKER = "__SAFE_HEX__"
 # String representation for NULL value
 NULL = "NULL"
 
+# Splitter used between requests in BURP log files
+BURP_REQUEST_REGEX = r"={10,}\s+([A-Z]{3,} .+?)\s+={10,}"
+
+# Regex used for parsing XML Burp saved history items
+BURP_XML_HISTORY_REGEX = r'<port>(\d+)</port>.+?<request base64="true"><!\[CDATA\[([^]]+)'
+
+# Extensions skipped by crawler
+CRAWL_EXCLUDE_EXTENSIONS = ("3ds", "3g2", "3gp", "7z", "DS_Store", "a", "aac", "adp", "ai", "aif", "aiff", "apk", "ar", "asf", "au", "avi", "bak", "bin", "bk", "bmp", "btif", "bz2", "cab", "caf", "cgm", "cmx", "cpio", "cr2", "dat", "deb", "djvu", "dll", "dmg", "dmp", "dng", "doc", "docx", "dot", "dotx", "dra", "dsk", "dts", "dtshd", "dvb", "dwg", "dxf", "ear", "ecelp4800", "ecelp7470", "ecelp9600", "egg", "eol", "eot", "epub", "exe", "f4v", "fbs", "fh", "fla", "flac", "fli", "flv", "fpx", "fst", "fvt", "g3", "gif", "gz", "h261", "h263", "h264", "ico", "ief", "image", "img", "ipa", "iso", "jar", "jpeg", "jpg", "jpgv", "jpm", "jxr", "ktx", "lvp", "lz", "lzma", "lzo", "m3u", "m4a", "m4v", "mar", "mdi", "mid", "mj2", "mka", "mkv", "mmr", "mng", "mov", "movie", "mp3", "mp4", "mp4a", "mpeg", "mpg", "mpga", "mxu", "nef", "npx", "o", "oga", "ogg", "ogv", "otf", "pbm", "pcx", "pdf", "pea", "pgm", "pic", "png", "pnm", "ppm", "pps", "ppt", "pptx", "ps", "psd", "pya", "pyc", "pyo", "pyv", "qt", "rar", "ras", "raw", "rgb", "rip", "rlc", "rz", "s3m", "s7z", "scm", "scpt", "sgi", "shar", "sil", "smv", "so", "sub", "swf", "tar", "tbz2", "tga", "tgz", "tif", "tiff", "tlz", "ts", "ttf", "uvh", "uvi", "uvm", "uvp", "uvs", "uvu", "viv", "vob", "war", "wav", "wax", "wbmp", "wdp", "weba", "webm", "webp", "whl", "wm", "wma", "wmv", "wmx", "woff", "woff2", "wvx", "xbm", "xif", "xls", "xlsx", "xlt", "xm", "xpi", "xpm", "xwd", "xz", "z", "zip", "zipx")
+
+
 def filterNone(values):  # Cross-referenced function
     # replace 
     return [_ for _ in values if _] if isinstance(values, typing.collections.abc.Iterable) else values
+
+def isListLike(value):  # Cross-referenced function
+    # for simplicity, remove BigArray
+    return isinstance(value, (list, tuple, set))
 
 def getUnicode(value, encoding=None, noneToNull=False):
     """
@@ -36,32 +52,33 @@ def getUnicode(value, encoding=None, noneToNull=False):
         return value
     elif isinstance(value, bytes):
         # Heuristics (if encoding not explicitly specified)
-        candidates = filterNone((encoding, kb.get("pageEncoding") if kb.get("originalPage") else None, conf.get("encoding"), UNICODE_ENCODING, sys.getfilesystemencoding()))
-        if all(_ in value for _ in (b'<', b'>')):
-            pass
-        elif any(_ in value for _ in (b":\\", b'/', b'.')) and b'\n' not in value:
-            candidates = filterNone((encoding, sys.getfilesystemencoding(), kb.get("pageEncoding") if kb.get("originalPage") else None, UNICODE_ENCODING, conf.get("encoding")))
-        elif conf.get("encoding") and b'\n' not in value:
-            candidates = filterNone((encoding, conf.get("encoding"), kb.get("pageEncoding") if kb.get("originalPage") else None, sys.getfilesystemencoding(), UNICODE_ENCODING))
+        # candidates = filterNone((encoding, kb.get("pageEncoding") if kb.get("originalPage") else None, conf.get("encoding"), UNICODE_ENCODING, sys.getfilesystemencoding()))
+        # if all(_ in value for _ in (b'<', b'>')):
+        #     pass
+        # elif any(_ in value for _ in (b":\\", b'/', b'.')) and b'\n' not in value:
+        #     candidates = filterNone((encoding, sys.getfilesystemencoding(), kb.get("pageEncoding") if kb.get("originalPage") else None, UNICODE_ENCODING, conf.get("encoding")))
+        # elif conf.get("encoding") and b'\n' not in value:
+        #     candidates = filterNone((encoding, conf.get("encoding"), kb.get("pageEncoding") if kb.get("originalPage") else None, sys.getfilesystemencoding(), UNICODE_ENCODING))
 
-        for candidate in candidates:
-            try:
-                return six.text_type(value, candidate)
-            except UnicodeDecodeError:
-                pass
+        # for candidate in candidates:
+        #     try:
+        #         return six.text_type(value, candidate)
+        #     except UnicodeDecodeError:
+        #         pass
 
         try:
-            return six.text_type(value, encoding or (kb.get("pageEncoding") if kb.get("originalPage") else None) or UNICODE_ENCODING)
+            # return six.text_type(value, encoding or (kb.get("pageEncoding") if kb.get("originalPage") else None) or UNICODE_ENCODING)
+            return str(value, UNICODE_ENCODING)
         except UnicodeDecodeError:
-            return six.text_type(value, UNICODE_ENCODING, errors="reversible")
+            return str(value, UNICODE_ENCODING, errors="reversible")
     elif isListLike(value):
         value = list(getUnicode(_, encoding, noneToNull) for _ in value)
         return value
     else:
         try:
-            return six.text_type(value)
+            return str(value)
         except UnicodeDecodeError:
-            return six.text_type(str(value), errors="ignore")  # encoding ignored for non-basestring instances
+            return str(str(value), errors="ignore")  # encoding ignored for non-basestring instances
 
 
 def getText(value, encoding=None):
@@ -94,7 +111,7 @@ def decodeHex(value, binary=True):
 
     retVal = value
 
-    if isinstance(value, six.binary_type):
+    if isinstance(value, bytes):
         value = getText(value)
 
     if value.lower().startswith("0x"):
@@ -127,6 +144,23 @@ def getBytes(value, encoding=UNICODE_ENCODING, errors="strict", unsafe=True):
 
         if unsafe:
             retVal = re.sub(b"\\\\x([0-9a-f]{2})", lambda _: decodeHex(_.group(1)), retVal)
+
+    return retVal
+
+def decodeBase64(value, binary=True, encoding=None):
+    """
+    Returns a decoded representation of provided Base64 value
+
+    >>> decodeBase64("MTIz") == b"123"
+    True
+    >>> decodeBase64("MTIz", binary=False)
+    '123'
+    """
+
+    retVal = base64.b64decode(value)
+
+    if not binary:
+        retVal = getText(retVal, encoding)
 
     return retVal
 
@@ -173,14 +207,14 @@ def parseRequestFile(reqFile, checkParams=True):
             cookie = extractRegexResult(r"COOKIE: (?P<result>.+?)\n", request, re.I)
 
             if not method or not url:
-                logger.debug("not a valid WebScarab log data")
+                print("not a valid WebScarab log data")
                 continue
 
-            if method.upper() == HTTPMETHOD.POST:
+            if method.upper() == "POST":
                 warnMsg = "POST requests from WebScarab logs aren't supported "
                 warnMsg += "as their body content is stored in separate files. "
                 warnMsg += "Nevertheless you can use -r to load them individually."
-                logger.warning(warnMsg)
+                print(warnMsg)
                 continue
 
             if not(conf.scope and not re.search(conf.scope, url, re.I)):
@@ -200,7 +234,7 @@ def parseRequestFile(reqFile, checkParams=True):
                         request = decodeBase64(request, binary=False)
                     except binascii.Error:
                         continue
-                    _ = re.search(r"%s:.+" % re.escape(HTTP_HEADER.HOST), request)
+                    _ = re.search(r"%s:.+" % re.escape("HOST"), request)
                     if _:
                         host = _.group(0).strip()
                         if not re.search(r":\d+\Z", host):
@@ -212,7 +246,7 @@ def parseRequestFile(reqFile, checkParams=True):
             reqResList = re.finditer(BURP_REQUEST_REGEX, content, re.I | re.S)
 
         for match in reqResList:
-            request = match if isinstance(match, six.string_types) else match.group(1)
+            request = match if isinstance(match, str) else match.group(1)
             request = re.sub(r"\A[^\w]+", "", request)
             schemePort = re.search(r"(http[\w]*)\:\/\/.*?\:([\d]+).+?={10,}", request, re.I | re.S)
 
@@ -226,7 +260,7 @@ def parseRequestFile(reqFile, checkParams=True):
             if "HTTP/" not in request:
                 continue
 
-            if re.search(r"^[\n]*%s.*?\.(%s)\sHTTP\/" % (HTTPMETHOD.GET, "|".join(CRAWL_EXCLUDE_EXTENSIONS)), request, re.I | re.M):
+            if re.search(r"^[\n]*%s.*?\.(%s)\sHTTP\/" % ("GET", "|".join(CRAWL_EXCLUDE_EXTENSIONS)), request, re.I | re.M):
                 continue
 
             getPostReq = False
@@ -250,7 +284,7 @@ def parseRequestFile(reqFile, checkParams=True):
                 line = line.strip('\r')
                 match = re.search(r"\A([A-Z]+) (.+) HTTP/[\d.]+\Z", line) if not method else None
 
-                if len(line.strip()) == 0 and method and method != HTTPMETHOD.GET and data is None:
+                if len(line.strip()) == 0 and method and method != "GET" and data is None:
                     data = ""
                     params = True
 
