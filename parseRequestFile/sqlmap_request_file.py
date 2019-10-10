@@ -274,7 +274,7 @@ def parseRequestFile(reqFile, checkParams=True):
             lines = request.split('\n')
             headers = []
 
-            for index in xrange(len(lines)):
+            for index in range(len(lines)):
                 line = lines[index]
 
                 if not line.strip() and index == len(lines) - 1:
